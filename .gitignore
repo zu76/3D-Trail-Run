@@ -1,0 +1,12 @@
+# Generated meshes — build artefacts, ~10 MB each
+3d-outputs/
+*.stl
+
+# SRTM elevation tiles — ~25 MB each, fetched separately (see README)
+hgt/
+
+__pycache__/
+*.pyc
+
+# Local Claude Code tool permissions — machine-specific
+.claude/settings.local.json
