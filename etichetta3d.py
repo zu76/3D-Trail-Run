@@ -58,6 +58,7 @@ POST_W = 0.80             # post width, mm (X)
 NOTCH_W = 0.45            # snap notch width, mm (X)
 NOTCH_H = 0.35            # snap notch length, mm (Y)
 NOTCH_OVER = 0.10         # notch penetration into the letter, mm
+BRIDGE_Z = 0.60           # depth of the bridge joining parts of one glyph, mm
 
 MESH_FINE = 0.10          # top-surface point spacing inside the chamfer band, mm
 MESH_COARSE = 0.25        # top-surface point spacing on the flat front face, mm
@@ -293,6 +294,26 @@ def box(x0, x1, y0, y1, z0, z1):
 
 
 # --------------------------------------------------------------------- layout
+def components(loops):
+    """Split a glyph into its disconnected solids: each outer loop with the
+    holes nested inside it. Impact's `i` is a stem plus a separate dot, so a
+    glyph is not always one piece, and every piece needs its own post or it
+    prints unattached to the runner."""
+    depth = []
+    for i, L in enumerate(loops):
+        d = sum(1 for j, O in enumerate(loops)
+                if i != j and _crossings(L[0][None, :], O)[0] % 2 == 1)
+        depth.append(d)
+    out = []
+    for i, L in enumerate(loops):
+        if depth[i] % 2:
+            continue
+        holes = [O for j, O in enumerate(loops)
+                 if depth[j] % 2 and _crossings(O[0][None, :], L)[0] % 2 == 1]
+        out.append([L] + holes)
+    return out
+
+
 def scan_x(loops, y):
     """Solid x intervals of the glyph at height y."""
     xs = []
@@ -313,20 +334,28 @@ def layout(cap):
     M = {}
     for ch in set(TEXT) - {" "}:
         L = [q * k for q in glyph_loops(ch, fp)]
-        ymax = max(q[:, 1].max() for q in L)
-        best = (0.0, 0.0)
-        for f in (0.02, 0.04, 0.07, 0.10):
-            for a, b in scan_x(L, ymax - f * cap):
-                if b - a > best[1] - best[0]:
-                    best = (a, b)
-            if best[1] - best[0] > 0.10 * cap:
-                break
+        gates = []
+        for comp in components(L):
+            ctop = max(q[:, 1].max() for q in comp)
+            best = (0.0, 0.0)
+            for f in (0.02, 0.04, 0.07, 0.10):
+                for a, b in scan_x(comp, ctop - f * cap):
+                    if b - a > best[1] - best[0]:
+                        best = (a, b)
+                if best[1] - best[0] > 0.10 * cap:
+                    break
+            gates.append(dict(top=ctop,
+                               bot=min(q[:, 1].min() for q in comp),
+                               il=min(q[:, 0].min() for q in comp),
+                               ir=max(q[:, 0].max() for q in comp),
+                               ga=best[0], gb=best[1]))
         M[ch] = dict(loops=L,
                      adv=ft.load_char(ord(ch)).linearHoriAdvance / 65536.0 * k,
                      il=min(q[:, 0].min() for q in L),
                      ir=max(q[:, 0].max() for q in L),
-                     top=ymax, bot=min(q[:, 1].min() for q in L),
-                     ga=best[0], gb=best[1])
+                     top=max(q[:, 1].max() for q in L),
+                     bot=min(q[:, 1].min() for q in L),
+                     gates=gates)
     space = ft.load_char(32).linearHoriAdvance / 65536.0 * k
 
     pen, placed, added = 0.0, [], 0.0
@@ -405,7 +434,11 @@ def write_stl(T, path, name):
 # ------------------------------------------------------------------------ main
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default=os.path.join("3d-outputs", "GTC55-2026"))
+    ap.add_argument("--name", default="GTC55-2026",
+                    help="project name: output subfolder and filename prefix")
+    ap.add_argument("--text", default=TEXT, help="label text")
+    ap.add_argument("--out", default=None,
+                    help="output directory (default 3d-outputs/<name>)")
     ap.add_argument("--part", default="all", choices=["all", "letters", "runner"])
     ap.add_argument("--cap", type=float, default=CAP)
     ap.add_argument("--depth", type=float, default=DEPTH)
@@ -414,6 +447,10 @@ def main():
     ap.add_argument("--fit", action="store_true",
                     help="solve the cap height so the label fills --max-len")
     args = ap.parse_args()
+
+    globals()["TEXT"] = args.text
+    if args.out is None:
+        args.out = os.path.join("3d-outputs", args.name)
 
     if args.fit:
         args.cap = fit_cap(args.max_len)
@@ -451,19 +488,47 @@ def main():
         n0 = len(parts)
         parts.append(box(0.0, width, spine_y, spine_y + SPINE_H, 0.0, RAIL_Z))
         est += width * SPINE_H * RAIL_Z
+        posts, nbridge = [], 0
         for p in placed:
-            m = M[p["ch"]]
-            cx = p["x"] + (m["ga"] + m["gb"]) / 2
-            pw = min(POST_W, max(0.35, (m["gb"] - m["ga"]) - 0.25))
-            y_notch = m["top"] + NOTCH_H
+            # highest part carries the post; lower parts hang off it. A second
+            # post to a lower part would have to pass straight through the one
+            # above (Impact's `i` dot overlaps its stem across the full width),
+            # welding coincident faces and breaking manifoldness.
+            g = sorted(M[p["ch"]]["gates"], key=lambda d: -d["top"])
+            head = g[0]
+            cx = p["x"] + (head["ga"] + head["gb"]) / 2
+            pw = min(POST_W, max(0.35, (head["gb"] - head["ga"]) - 0.25))
+            y_notch = head["top"] + NOTCH_H
             parts.append(box(cx - pw / 2, cx + pw / 2, y_notch, spine_y, 0.0, RAIL_Z))
             parts.append(box(cx - NOTCH_W / 2, cx + NOTCH_W / 2,
-                             m["top"] - NOTCH_OVER, y_notch, 0.0, RAIL_Z))
+                             head["top"] - NOTCH_OVER, y_notch, 0.0, RAIL_Z))
             est += pw * max(0.0, spine_y - y_notch) * RAIL_Z
             est += NOTCH_W * (NOTCH_H + NOTCH_OVER) * RAIL_Z
-        posts = [SPINE_CLR + top - M[p["ch"]]["top"] for p in placed]
+            posts.append(spine_y - head["top"])
+
+            for part in g[1:]:
+                up = min((u for u in g if u["top"] > part["top"]
+                          and min(u["ir"], part["ir"]) > max(u["il"], part["il"])),
+                         key=lambda u: u["bot"], default=None)
+                if up is None:
+                    continue
+                x0 = max(up["il"], part["il"]); x1 = min(up["ir"], part["ir"])
+                bw = min(NOTCH_W, x1 - x0)
+                bx = p["x"] + (x0 + x1) / 2
+                parts.append(box(bx - bw / 2, bx + bw / 2,
+                                 part["top"] - NOTCH_OVER, up["bot"] + NOTCH_OVER,
+                                 0.0, BRIDGE_Z))
+                est += bw * (up["bot"] - part["top"] + 2 * NOTCH_OVER) * BRIDGE_Z
+                nbridge += 1
+
         print(f"runner : {len(parts) - n0} shells (1 spine + {len(placed)} posts "
-              f"+ {len(placed)} notches), post length {min(posts):.2f}..{max(posts):.2f} mm")
+              f"+ {len(placed)} notches + {nbridge} bridges), "
+              f"post length {min(posts):.2f}..{max(posts):.2f} mm")
+        multi = sorted({p["ch"] for p in placed if len(M[p["ch"]]["gates"]) > 1})
+        if multi:
+            print(f"         multi-part glyphs bridged at the back "
+                  f"({BRIDGE_Z:.1f} mm deep, front {DEPTH - BRIDGE_Z:.1f} mm clear): "
+                  f"{' '.join(multi)}")
 
     T = np.concatenate(parts).astype(np.float64)
     print("validation")
@@ -471,8 +536,8 @@ def main():
 
     os.makedirs(args.out, exist_ok=True)
     suffix = {"all": "", "letters": "_letters", "runner": "_runner"}[args.part]
-    path = os.path.join(args.out, f"GTC55-2026_label_{width:.0f}mm{suffix}.stl")
-    write_stl(T, path, f"GTC55-2026 label {args.part}")
+    path = os.path.join(args.out, f"{args.name}_label_{width:.0f}mm{suffix}.stl")
+    write_stl(T, path, f"{args.name} label {args.part}")
     print(f"written {path}  ({os.path.getsize(path)/1e6:.2f} MB, {len(T)} triangles)")
 
 
