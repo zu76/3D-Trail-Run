@@ -12,7 +12,7 @@ import argparse, struct
 import numpy as np
 from scipy.spatial import cKDTree
 
-FLOOR, GW, TW, SPORG = 6.0, 1.15, 0.90, 0.40
+FLOOR, GW, TW, SPORG = 6.0, 1.20, 0.90, 0.40
 
 
 def load(p):
@@ -101,7 +101,7 @@ def main():
         worst = min(worst, d.min())
         print("   %5.1f  %8d      %.4f      %.4f       %.4f"
               % (z, len(P), d.min(), d.mean(), d.max()))
-    print("   gioco nominale 0.1250 mm per lato")
+    print("   gioco nominale %.4f mm per lato" % ((GW - TW) / 2))
 
     print("\n4. SPORGENZA SULLA SUPERFICIE")
     top = vk[vk[:, 2] > vk[:, 2].min() + 0.01]
@@ -120,7 +120,7 @@ def main():
           % (vk[:, 2].max(), vr[:, 2].max(), vk[:, 2].max() < vr[:, 2].max()))
 
     print("\nESITO: %s" % ("compatibili, nessuna interferenza"
-                           if worst > 0.10 and inside else "DA CONTROLLARE"))
+                           if worst > 0.80 * (GW - TW) / 2 and inside else "DA CONTROLLARE"))
 
 
 if __name__ == "__main__":

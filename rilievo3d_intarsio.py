@@ -14,13 +14,14 @@ Mesh scritte a mano, nessuna libreria CAD. Validazione: manifold, Eulero,
 volume con segno contro stima indipendente.
 
 Dipendenze: dem.py (nella stessa cartella), numpy, scipy
-Output: courmayeur_GTC_150mm_rilievo.stl, courmayeur_GTC_150mm_traccia.stl
+Output: 3d-outputs/<name>/<name>_<size>mm_rilievo.stl and _traccia.stl
 
 Uso:
-    python3 rilievo3d_intarsio.py --gpx activity_23561586194.gpx --out .
-    # richiede ./hgt/N45E006.hgt e ./hgt/N45E007.hgt
+    python3 rilievo3d_intarsio.py --gpx activity.gpx --name courmayeur_GTC
+    python3 rilievo3d_intarsio.py --gpx activity.gpx --name Valgrosina-2026         --bbox 46.2854 46.3981 10.1826 10.3457 --size 150
+    # richiede i tile ./hgt/NxxEyyy.hgt che coprono la bbox
 """
-import argparse, math, struct
+import argparse, math, os, struct
 import numpy as np
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 from scipy.spatial import cKDTree
@@ -30,7 +31,8 @@ import dem
 LAT0, LAT1, LON0, LON1 = 45.7010, 45.8988, 6.7880, 7.0713
 SIZE, VEX, PLINTH = 150.0, 1.3, 10.0
 FLOOR_Z = 6.0
-GROOVE_W, TRACK_W, SPORG = 1.15, 0.90, 0.40
+GROOVE_W, TRACK_W, SPORG = 1.20, 0.90, 0.40   # 0.150 mm/side clearance;
+# 1.15 (0.125/side) printed and fitted on GTC55 but was stiff to assemble
 GRID = 700
 SMOOTH_MM = 0.10          # lisciatura della traccia (14,7 m al suolo)
 CL_STEP = 0.05            # passo della centerline per il campo di distanza
@@ -277,8 +279,36 @@ def write_stl(T, path, name):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--gpx", required=True)
-    ap.add_argument("--out", default=".")
+    ap.add_argument("--name", default="courmayeur_GTC",
+                    help="project name: output subfolder and filename prefix")
+    ap.add_argument("--out", default=None,
+                    help="output directory (default 3d-outputs/<name>)")
+    ap.add_argument("--bbox", nargs=4, type=float,
+                    metavar=("LAT0", "LAT1", "LON0", "LON1"))
+    ap.add_argument("--size", type=float, default=SIZE,
+                    help="longest side of the model, mm (house default 150)")
+    ap.add_argument("--vex", type=float, default=VEX)
+    ap.add_argument("--plinth", type=float, default=PLINTH)
+    ap.add_argument("--grid", type=int, default=GRID)
+    ap.add_argument("--groove", type=float, default=GROOVE_W,
+                    help="recess width, mm; clearance is (groove - track)/2 per side")
+    ap.add_argument("--track", type=float, default=TRACK_W, help="insert width, mm")
     args = ap.parse_args()
+
+    # the module-level constants are read at call time, so overriding them here
+    # reparameterises the whole pipeline without threading arguments through
+    g = globals()
+    if args.bbox:
+        g["LAT0"], g["LAT1"], g["LON0"], g["LON1"] = args.bbox
+    g["SIZE"], g["VEX"], g["PLINTH"], g["GRID"] = (
+        args.size, args.vex, args.plinth, args.grid)
+    g["GROOVE_W"], g["TRACK_W"] = args.groove, args.track
+    out = args.out or os.path.join("3d-outputs", args.name)
+    os.makedirs(out, exist_ok=True)
+    print(f"bbox {LAT0:.4f} {LAT1:.4f} {LON0:.4f} {LON1:.4f} | "
+          f"size {SIZE:.0f} mm | vex {VEX} | plinth {PLINTH} | grid {GRID}")
+    print(f"groove {GROOVE_W:.2f} | track {TRACK_W:.2f} | "
+          f"clearance {(GROOVE_W - TRACK_W) / 2:.3f} mm per side")
 
     cl, (W, H, s) = centerline(args.gpx)
     print(f"modello {W*s:.1f} x {H*s:.1f} mm | scala 1:{1/s*1000:.0f} | "
@@ -288,14 +318,18 @@ def main():
     cell = (W * s) / (D.shape[1] - 1) * (H * s) / (D.shape[0] - 1)
     est = Zt.mean() * (W * s) * (H * s) - ((D < 0).sum() * cell) * (Zt[D < 0].mean() - FLOOR_Z)
     validate(Tr, "rilievo", est)
-    write_stl(Tr, f"{args.out}/courmayeur_GTC_150mm_rilievo.stl", "rilievo con scavo")
+    rel = os.path.join(out, f"{args.name}_{SIZE:.0f}mm_rilievo.stl")
+    write_stl(Tr, rel, "rilievo con scavo")
+    print(f"  -> {rel}")
 
     Tt = build(cl, "traccia")
     estt = ((-D + (GROOVE_W - TRACK_W) / 2) > 0)
     mask = (np.abs(0) == 0)
     validate(Tt, "traccia")
-    write_stl(Tt, f"{args.out}/courmayeur_GTC_150mm_traccia.stl", "traccia a innesto")
-    np.save("grid_cache.npy", np.stack([Zt, D]))
+    trk = os.path.join(out, f"{args.name}_{SIZE:.0f}mm_traccia.stl")
+    write_stl(Tt, trk, "traccia a innesto")
+    print(f"  -> {trk}")
+    np.save(os.path.join(out, "grid_cache.npy"), np.stack([Zt, D]))
 
 
 if __name__ == "__main__":
