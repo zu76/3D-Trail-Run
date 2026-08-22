@@ -160,6 +160,29 @@ The label chi is again a prediction rather than an observation: 89 shells give
   0.90 -> 0.86, which requires re-running `verifica_congruenza.py` because
   FLOOR_Z, SPORG, GROOVE_W and TRACK_W are coupled.
 
+### Changed — documentation restructured
+
+- `README.md` rewritten as the **current setup**: parameter tables for the
+  relief/track and label pipelines, a Key decisions section giving the reason
+  behind each choice rather than only the value, usage for both generators, and
+  a documentation map.
+- `README.md` now opens with an explicit statement that the project targets a
+  **single-extruder, single-filament printer**, and that this constraint is the
+  origin of most of the engineering here: the two-piece inlay exists because the
+  relief and track cannot be printed in two colours in one pass, and the letters
+  are separate glued parts for the same reason. On a multi-material printer
+  (AMS, MMU, IDEX, toolchanger) the sensible approach is likely a different one —
+  one object with a filament change and integrated lettering — and the recess,
+  the clearance, the congruence check and the snap-off runner all become
+  unnecessary. Readers were previously left to infer this.
+- `docs/project_handoff.md` carries a banner marking it **historical**, listing
+  the parameters that have since changed, and pointing at the README and
+  changelog. Deliberately left otherwise unedited so the original reasoning and
+  the original numbers stay readable; it is design history, not a source of
+  parameter values.
+- Corrected a stale figure in the results caption: the photographed piece was
+  built at 0.125 mm per side, which is no longer the default.
+
 ### Added — documentation
 
 - `CHANGELOG.md` — this file, tracking changes and the decisions behind them.

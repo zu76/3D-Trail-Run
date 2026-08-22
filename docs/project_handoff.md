@@ -1,5 +1,19 @@
 # `rilievo3d` Project — Handoff Document
 
+> **Historical document — describes the initial setup, not the current one.**
+>
+> This is the design record of the project as it stood when it was first handed
+> over, and it is deliberately left unedited so the original reasoning and the
+> original numbers stay readable. Several parameters have since changed: the
+> insert clearance is now 0.150 mm per side rather than 0.125, relief frames are
+> 150 x 150 mm by default, and the pipeline takes its configuration from the
+> command line instead of module constants.
+>
+> For the current setup read [../README.md](../README.md). For what changed and
+> why, read [../CHANGELOG.md](../CHANGELOG.md). Use this document for design
+> history, the derivation of the two approaches, and the error history — not as
+> a source of parameter values.
+
 Continuity document for resuming the project in Claude Code.
 Contains: objective, data, **both developed approaches** (incised track and inlay track),
 all parameters, decision history and errors, validation method, and conventions to
